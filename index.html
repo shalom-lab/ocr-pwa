@@ -240,18 +240,14 @@
     </main>
 
     <script type="module">
-        import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers";
-
-        // 禁用本地模型检查
-        env.allowLocalModels = false;
-        // 设置缓存目录
-        env.cacheDir = './model-cache';
+        import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@2.11.0/dist/transformers.min.js";
 
         // DOM 元素引用
         const fileUpload = document.getElementById("file-upload");
         const imageContainer = document.getElementById("image-container");
         const status = document.getElementById("status");
 
+        // 显示加载状态
         function showLoading(message) {
             status.innerHTML = `
                 ${message}
@@ -265,105 +261,46 @@
         }
 
         // 初始化模型
-        let detector;
-        
-        async function initModel() {
-            // 定义要尝试的模型列表，从小到大排序
-            const modelOptions = [
-                {
-                    name: "Xenova/yolos-tiny", // 最小的模型
-                    options: {
-                        quantized: true,
-                        config: {
-                            use_simd: false,
-                            use_threads: false
-                        }
-                    }
-                },
-                {
-                    name: "Xenova/detr-resnet-50",
-                    options: {
-                        quantized: true,
-                        dtype: 'q8',
-                        config: {
-                            use_simd: false,
-                            use_threads: false,
-                            max_retries: 5,
-                            timeout: 120000
-                        }
-                    }
-                }
-            ];
+        let detector = null;
+        let modelLoading = false;
+
+        // 简化的模型加载函数
+        async function loadModel() {
+            if (detector || modelLoading) return;
             
-            // 尝试加载每个模型，直到成功
-            for (const modelOption of modelOptions) {
-                try {
-                    showLoading(`Loading ${modelOption.name.split('/')[1]} model...`);
-                    
-                    // 添加进度回调
-                    const options = {
-                        ...modelOption.options,
-                        progress_callback: (progress) => {
-                            if (progress.status === 'progress') {
-                                const percent = Math.round(progress.progress * 100);
-                                status.textContent = `Loading ${modelOption.name.split('/')[1]}: ${percent}%`;
-                            }
-                        }
-                    };
-                    
-                    // 使用超时包装模型加载
-                    detector = await Promise.race([
-                        pipeline("object-detection", modelOption.name, options),
-                        new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error("Model loading timeout")), 60000)
-                        )
-                    ]);
-                    
-                    status.textContent = `Ready (using ${modelOption.name.split('/')[1]})`;
-                    return true;
-                } catch (error) {
-                    console.error(`Error loading ${modelOption.name}:`, error);
-                    // 继续尝试下一个模型
-                }
+            modelLoading = true;
+            showLoading("Loading model...");
+            
+            try {
+                // 使用较小的模型
+                detector = await pipeline("object-detection", "Xenova/yolos-tiny", {
+                    quantized: true
+                });
+                status.textContent = "Ready";
+                return true;
+            } catch (error) {
+                console.error("Model loading error:", error);
+                status.innerHTML = `
+                    Error loading model. <br>
+                    <small>Please check your internet connection.</small>
+                    <button id="retry-button" style="display: block; margin: 10px auto; padding: 8px 16px; background-color: var(--primary-color); color: white; border: none; border-radius: var(--border-radius); cursor: pointer;">
+                        Retry
+                    </button>
+                `;
+                
+                document.getElementById("retry-button").addEventListener("click", () => {
+                    modelLoading = false;
+                    loadModel();
+                });
+                
+                return false;
+            } finally {
+                modelLoading = false;
             }
-            
-            // 如果所有模型都失败，显示错误
-            status.innerHTML = `
-                <div style="text-align: center;">
-                    <p>Failed to load any model.</p>
-                    <p><small>This may be due to network issues or browser compatibility.</small></p>
-                    <p><small>Try using a different browser or check your internet connection.</small></p>
-                    <button id="retry-button" style="margin: 10px auto; padding: 8px 16px; background-color: var(--primary-color); color: white; border: none; border-radius: var(--border-radius); cursor: pointer;">
-                        Retry Loading
-                    </button>
-                    <button id="offline-button" style="margin: 10px auto; padding: 8px 16px; background-color: #64748b; color: white; border: none; border-radius: var(--border-radius); cursor: pointer;">
-                        Continue in Offline Mode
-                    </button>
-                </div>
-            `;
-            
-            document.getElementById("retry-button").addEventListener("click", () => {
-                initModel();
-            });
-            
-            document.getElementById("offline-button").addEventListener("click", () => {
-                status.textContent = "Offline mode: Upload images to view (no detection available)";
-                // 允许用户上传图片但不进行检测
-                window.offlineMode = true;
-            });
-            
-            return false;
         }
 
-        // 尝试初始化模型
-        initModel().then(() => {
-            console.log('Model initialization complete');
-        }).catch(error => {
-            console.error('Failed to initialize model:', error);
-        });
-
         // 渲染边界框
-        function renderBox({ box, label }) {
+        function renderBox({ box, label, score }) {
             const { xmax, xmin, ymax, ymin } = box;
             const color = "#" + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, 0);
 
@@ -378,7 +315,7 @@
             });
 
             const labelElement = document.createElement("span");
-            labelElement.textContent = label;
+            labelElement.textContent = `${label} (${Math.round(score * 100)}%)`;
             labelElement.className = "bounding-box-label";
             labelElement.style.backgroundColor = color;
 
@@ -388,19 +325,8 @@
 
         // 检测对象
         async function detect(img) {
-            // 检查是否在离线模式
-            if (window.offlineMode) {
-                status.textContent = "Offline mode: Detection not available";
+            if (!detector && !(await loadModel())) {
                 return;
-            }
-            
-            // 如果模型未加载，尝试重新加载
-            if (!detector) {
-                const success = await initModel();
-                if (!success) {
-                    status.textContent = "Cannot detect objects: Model not loaded";
-                    return;
-                }
             }
             
             // 添加分析中的视觉反馈
@@ -418,16 +344,10 @@
             imageContainer.appendChild(overlay);
             
             try {
-                // 使用超时包装检测过程
-                const output = await Promise.race([
-                    detector(img.src, {
-                        threshold: 0.5,
-                        percentage: true,
-                    }),
-                    new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error("Detection timeout")), 30000)
-                    )
-                ]);
+                const output = await detector(img.src, {
+                    threshold: 0.4,
+                    percentage: true,
+                });
                 
                 // 移除分析中的视觉反馈
                 imageContainer.removeChild(overlay);
@@ -436,22 +356,11 @@
                     status.textContent = "No objects detected in this image.";
                 } else {
                     status.textContent = `Detected ${output.length} object(s)`;
-                    console.log("output", output);
                     output.forEach(renderBox);
                 }
             } catch (error) {
                 console.error("Detection error:", error);
-                status.textContent = "Error during detection: " + error.message;
-                
-                // 提供重试选项
-                const retryButton = document.createElement("button");
-                retryButton.textContent = "Retry Detection";
-                retryButton.style = "display: block; margin: 10px auto; padding: 8px 16px; background-color: var(--primary-color); color: white; border: none; border-radius: var(--border-radius); cursor: pointer;";
-                retryButton.onclick = () => {
-                    status.removeChild(retryButton);
-                    detect(img);
-                };
-                status.appendChild(retryButton);
+                status.textContent = "Error during detection";
                 
                 // 移除分析中的视觉反馈
                 if (imageContainer.contains(overlay)) {
@@ -471,9 +380,19 @@
                 const image = document.createElement("img");
                 image.src = e2.target.result;
                 imageContainer.appendChild(image);
-                detect(image);
+                
+                // 图片加载完成后进行检测
+                image.onload = () => detect(image);
             };
             reader.readAsDataURL(file);
+        });
+
+        // 预加载模型
+        window.addEventListener('load', () => {
+            // 延迟加载模型，让页面先渲染完成
+            setTimeout(() => {
+                loadModel();
+            }, 1000);
         });
     </script>
 
