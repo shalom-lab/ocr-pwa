@@ -240,7 +240,10 @@
     </main>
 
     <script type="module">
-        import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@2.11.0/dist/transformers.min.js";
+        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.6.0';
+
+        // 禁用本地模型检查
+        env.allowLocalModels = false;
 
         // DOM 元素引用
         const fileUpload = document.getElementById("file-upload");
@@ -262,19 +265,18 @@
 
         // 初始化模型
         let detector = null;
-        let modelLoading = false;
 
-        // 简化的模型加载函数
-        async function loadModel() {
-            if (detector || modelLoading) return;
-            
-            modelLoading = true;
-            showLoading("Loading model...");
-            
+        // 加载模型
+        async function initModel() {
             try {
-                // 使用较小的模型
-                detector = await pipeline("object-detection", "Xenova/yolos-tiny", {
-                    quantized: true
+                showLoading("Loading model...");
+                detector = await pipeline('object-detection', 'Xenova/detr-resnet-50', {
+                    quantized: true,
+                    progress_callback: progress => {
+                        if (progress.status === 'progress') {
+                            status.textContent = `Loading model: ${Math.round(progress.progress * 100)}%`;
+                        }
+                    }
                 });
                 status.textContent = "Ready";
                 return true;
@@ -289,13 +291,10 @@
                 `;
                 
                 document.getElementById("retry-button").addEventListener("click", () => {
-                    modelLoading = false;
-                    loadModel();
+                    initModel();
                 });
                 
                 return false;
-            } finally {
-                modelLoading = false;
             }
         }
 
@@ -315,7 +314,7 @@
             });
 
             const labelElement = document.createElement("span");
-            labelElement.textContent = `${label} (${Math.round(score * 100)}%)`;
+            labelElement.textContent = label + (score ? ` (${Math.round(score * 100)}%)` : '');
             labelElement.className = "bounding-box-label";
             labelElement.style.backgroundColor = color;
 
@@ -325,8 +324,10 @@
 
         // 检测对象
         async function detect(img) {
-            if (!detector && !(await loadModel())) {
-                return;
+            // 如果模型未加载，尝试加载
+            if (!detector) {
+                const success = await initModel();
+                if (!success) return;
             }
             
             // 添加分析中的视觉反馈
@@ -344,18 +345,20 @@
             imageContainer.appendChild(overlay);
             
             try {
+                status.textContent = "Analysing...";
                 const output = await detector(img.src, {
-                    threshold: 0.4,
+                    threshold: 0.5,
                     percentage: true,
                 });
                 
                 // 移除分析中的视觉反馈
                 imageContainer.removeChild(overlay);
+                status.textContent = "";
                 
                 if (output.length === 0) {
                     status.textContent = "No objects detected in this image.";
                 } else {
-                    status.textContent = `Detected ${output.length} object(s)`;
+                    console.log("Detected objects:", output);
                     output.forEach(renderBox);
                 }
             } catch (error) {
@@ -387,11 +390,11 @@
             reader.readAsDataURL(file);
         });
 
-        // 预加载模型
+        // 页面加载完成后初始化模型
         window.addEventListener('load', () => {
             // 延迟加载模型，让页面先渲染完成
             setTimeout(() => {
-                loadModel();
+                initModel();
             }, 1000);
         });
     </script>
