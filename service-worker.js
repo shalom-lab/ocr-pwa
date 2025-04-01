@@ -41,28 +41,56 @@ self.addEventListener('fetch', event => {
   // 跳过不支持缓存的请求（如 Chrome 扩展请求）
   if (!event.request.url.startsWith('http')) return;
   
-  // 对于模型文件，使用网络优先策略
+  // 对于模型文件，使用更可靠的策略
   if (event.request.url.includes('cdn-lfs.hf.co') || 
       event.request.url.includes('huggingface.co') || 
       event.request.url.includes('.onnx')) {
     
     event.respondWith(
-      fetch(event.request.clone())
-        .then(response => {
-          // 缓存有效响应
-          if (response && response.status === 200) {
-            const responseToCache = response.clone();
-            caches.open(CACHE_NAME)
-              .then(cache => {
-                cache.put(event.request, responseToCache);
-              });
+      // 首先尝试从缓存获取
+      caches.match(event.request).then(cachedResponse => {
+        if (cachedResponse) {
+          // 如果缓存中有响应，返回缓存的响应
+          return cachedResponse;
+        }
+        
+        // 否则尝试从网络获取
+        return fetch(event.request.clone(), {
+          // 添加更长的超时时间
+          signal: AbortSignal.timeout ? AbortSignal.timeout(120000) : undefined,
+          // 确保获取完整响应
+          cache: 'no-store'
+        })
+        .then(networkResponse => {
+          // 如果响应无效，直接返回
+          if (!networkResponse || networkResponse.status !== 200) {
+            return networkResponse;
           }
-          return response;
+          
+          // 克隆响应，因为响应是流，只能使用一次
+          const responseToCache = networkResponse.clone();
+          
+          // 将新响应添加到缓存
+          caches.open(CACHE_NAME)
+            .then(cache => {
+              cache.put(event.request, responseToCache);
+            })
+            .catch(err => console.error('Cache put error:', err));
+            
+          return networkResponse;
         })
-        .catch(() => {
-          // 如果网络请求失败，尝试从缓存获取
-          return caches.match(event.request);
-        })
+        .catch(error => {
+          console.error('Fetch error for model file:', error);
+          // 如果网络请求失败，返回一个友好的错误响应
+          return new Response(
+            JSON.stringify({ error: 'Failed to fetch model file. Please try again later.' }),
+            { 
+              status: 503, 
+              headers: { 'Content-Type': 'application/json' } 
+            }
+          );
+        });
+      })
     );
     return;
   }
@@ -99,6 +127,13 @@ self.addEventListener('fetch', event => {
       .catch(error => {
         console.error('Fetch error:', error);
         // 可以在这里返回一个离线页面
+        return new Response(
+          '<html><body><h1>You are offline</h1><p>Please check your internet connection.</p></body></html>',
+          { 
+            status: 503, 
+            headers: { 'Content-Type': 'text/html' } 
+          }
+        );
       })
   );
 }); 

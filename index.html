@@ -216,7 +216,7 @@
 </head>
 <body>
     <main class="container">
-        <h1 class="title">Object Detection Demo</h1>
+        <h1 class="title">Object Detection Demo2</h1>
         <p class="description">
             Upload an image to detect objects using the DETR model. 
             The model will identify objects and draw bounding boxes around them.
@@ -268,69 +268,99 @@
         let detector;
         
         async function initModel() {
-            try {
-                showLoading("Loading model...");
-                
-                // 尝试使用更小的模型和更多选项来提高加载成功率
-                detector = await pipeline("object-detection", "Xenova/detr-resnet-50", {
-                    quantized: true,
-                    dtype: 'q8',
-                    progress_callback: (progress) => {
-                        if (progress.status === 'progress') {
-                            status.textContent = `Loading model: ${Math.round(progress.progress * 100)}%`;
-                        }
-                    },
-                    config: {
-                        use_simd: false,
-                        use_threads: false,
-                        max_retries: 5,  // 增加重试次数
-                        timeout: 120000  // 增加超时时间到2分钟
-                    }
-                });
-                
-                status.textContent = "Ready";
-                return true;
-            } catch (error) {
-                console.error("Model loading error:", error);
-                
-                // 尝试加载备用模型
-                try {
-                    status.textContent = "Trying alternative model...";
-                    detector = await pipeline("object-detection", "Xenova/yolos-tiny", {
+            // 定义要尝试的模型列表，从小到大排序
+            const modelOptions = [
+                {
+                    name: "Xenova/yolos-tiny", // 最小的模型
+                    options: {
                         quantized: true,
-                        progress_callback: (progress) => {
-                            if (progress.status === 'progress') {
-                                status.textContent = `Loading alternative model: ${Math.round(progress.progress * 100)}%`;
-                            }
-                        },
                         config: {
                             use_simd: false,
                             use_threads: false
                         }
-                    });
-                    status.textContent = "Ready (using alternative model)";
+                    }
+                },
+                {
+                    name: "Xenova/detr-resnet-50",
+                    options: {
+                        quantized: true,
+                        dtype: 'q8',
+                        config: {
+                            use_simd: false,
+                            use_threads: false,
+                            max_retries: 5,
+                            timeout: 120000
+                        }
+                    }
+                }
+            ];
+            
+            // 尝试加载每个模型，直到成功
+            for (const modelOption of modelOptions) {
+                try {
+                    showLoading(`Loading ${modelOption.name.split('/')[1]} model...`);
+                    
+                    // 添加进度回调
+                    const options = {
+                        ...modelOption.options,
+                        progress_callback: (progress) => {
+                            if (progress.status === 'progress') {
+                                const percent = Math.round(progress.progress * 100);
+                                status.textContent = `Loading ${modelOption.name.split('/')[1]}: ${percent}%`;
+                            }
+                        }
+                    };
+                    
+                    // 使用超时包装模型加载
+                    detector = await Promise.race([
+                        pipeline("object-detection", modelOption.name, options),
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error("Model loading timeout")), 60000)
+                        )
+                    ]);
+                    
+                    status.textContent = `Ready (using ${modelOption.name.split('/')[1]})`;
                     return true;
-                } catch (backupError) {
-                    console.error("Backup model loading error:", backupError);
-                    status.innerHTML = `
-                        Error loading models. <br>
-                        <small>This may be due to network issues or browser compatibility.</small>
-                        <button id="retry-button" style="display: block; margin: 10px auto; padding: 8px 16px; background-color: var(--primary-color); color: white; border: none; border-radius: var(--border-radius); cursor: pointer;">
-                            Retry Loading
-                        </button>
-                    `;
-                    
-                    document.getElementById("retry-button").addEventListener("click", () => {
-                        initModel();
-                    });
-                    
-                    return false;
+                } catch (error) {
+                    console.error(`Error loading ${modelOption.name}:`, error);
+                    // 继续尝试下一个模型
                 }
             }
+            
+            // 如果所有模型都失败，显示错误
+            status.innerHTML = `
+                <div style="text-align: center;">
+                    <p>Failed to load any model.</p>
+                    <p><small>This may be due to network issues or browser compatibility.</small></p>
+                    <p><small>Try using a different browser or check your internet connection.</small></p>
+                    <button id="retry-button" style="margin: 10px auto; padding: 8px 16px; background-color: var(--primary-color); color: white; border: none; border-radius: var(--border-radius); cursor: pointer;">
+                        Retry Loading
+                    </button>
+                    <button id="offline-button" style="margin: 10px auto; padding: 8px 16px; background-color: #64748b; color: white; border: none; border-radius: var(--border-radius); cursor: pointer;">
+                        Continue in Offline Mode
+                    </button>
+                </div>
+            `;
+            
+            document.getElementById("retry-button").addEventListener("click", () => {
+                initModel();
+            });
+            
+            document.getElementById("offline-button").addEventListener("click", () => {
+                status.textContent = "Offline mode: Upload images to view (no detection available)";
+                // 允许用户上传图片但不进行检测
+                window.offlineMode = true;
+            });
+            
+            return false;
         }
 
         // 尝试初始化模型
-        await initModel();
+        initModel().then(() => {
+            console.log('Model initialization complete');
+        }).catch(error => {
+            console.error('Failed to initialize model:', error);
+        });
 
         // 渲染边界框
         function renderBox({ box, label }) {
@@ -358,6 +388,12 @@
 
         // 检测对象
         async function detect(img) {
+            // 检查是否在离线模式
+            if (window.offlineMode) {
+                status.textContent = "Offline mode: Detection not available";
+                return;
+            }
+            
             // 如果模型未加载，尝试重新加载
             if (!detector) {
                 const success = await initModel();
@@ -382,10 +418,16 @@
             imageContainer.appendChild(overlay);
             
             try {
-                const output = await detector(img.src, {
-                    threshold: 0.5,
-                    percentage: true,
-                });
+                // 使用超时包装检测过程
+                const output = await Promise.race([
+                    detector(img.src, {
+                        threshold: 0.5,
+                        percentage: true,
+                    }),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error("Detection timeout")), 30000)
+                    )
+                ]);
                 
                 // 移除分析中的视觉反馈
                 imageContainer.removeChild(overlay);
@@ -400,7 +442,21 @@
             } catch (error) {
                 console.error("Detection error:", error);
                 status.textContent = "Error during detection: " + error.message;
-                imageContainer.removeChild(overlay);
+                
+                // 提供重试选项
+                const retryButton = document.createElement("button");
+                retryButton.textContent = "Retry Detection";
+                retryButton.style = "display: block; margin: 10px auto; padding: 8px 16px; background-color: var(--primary-color); color: white; border: none; border-radius: var(--border-radius); cursor: pointer;";
+                retryButton.onclick = () => {
+                    status.removeChild(retryButton);
+                    detect(img);
+                };
+                status.appendChild(retryButton);
+                
+                // 移除分析中的视觉反馈
+                if (imageContainer.contains(overlay)) {
+                    imageContainer.removeChild(overlay);
+                }
             }
         }
 
