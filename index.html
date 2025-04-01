@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Object Detection Demo</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- PWA 相关元数据 -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <link rel="apple-touch-icon" href="icons/icon192.png">
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --secondary-color: #1e40af;
+            --background-color: #f8fafc;
+            --text-color: #1e293b;
+            --border-radius: 8px;
+            --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            line-height: 1.5;
+        }
+
+        .container {
+            margin: 20px auto;
+            width: min(90vw, 600px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.8rem;
+            padding: 0.8rem;
+        }
+
+        .title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 0.3rem;
+        }
+
+        .description {
+            text-align: center;
+            color: #64748b;
+            max-width: 600px;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .custom-file-upload {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background-color: var(--primary-color);
+            color: white;
+            padding: 8px 16px;
+            cursor: pointer;
+            border-radius: var(--border-radius);
+            font-weight: 500;
+            transition: all 0.2s ease;
+            box-shadow: var(--shadow);
+        }
+
+        .custom-file-upload:hover {
+            background-color: var(--secondary-color);
+            transform: translateY(-1px);
+        }
+
+        #file-upload {
+            display: none;
+        }
+
+        .upload-icon {
+            width: 20px;
+            height: 20px;
+            filter: brightness(0) invert(1);
+        }
+
+        #image-container {
+            width: 100%;
+            max-height: 50vh;
+            min-height: 200px;
+            margin-top: 10px;
+            position: relative;
+            background-color: white;
+            padding: 0.5rem;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #image-container > img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border-radius: calc(var(--border-radius) - 4px);
+        }
+
+        .bounding-box {
+            position: absolute;
+            box-sizing: border-box;
+            border-width: 2px;
+            border-style: solid;
+            transition: all 0.2s ease;
+        }
+
+        .bounding-box:hover {
+            filter: brightness(1.1);
+        }
+
+        .bounding-box-label {
+            color: white;
+            position: absolute;
+            font-size: 12px;
+            margin-top: -24px;
+            margin-left: -2px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+
+        #status {
+            font-size: 0.875rem;
+            color: #64748b;
+            text-align: center;
+            min-height: 1.5rem;
+        }
+
+        .loading {
+            display: inline-block;
+            position: relative;
+            width: 80px;
+            height: 13px;
+        }
+
+        .loading div {
+            position: absolute;
+            width: 13px;
+            height: 13px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            animation-timing-function: cubic-bezier(0, 1, 1, 0);
+        }
+
+        .loading div:nth-child(1) {
+            left: 8px;
+            animation: loading1 0.6s infinite;
+        }
+
+        .loading div:nth-child(2) {
+            left: 8px;
+            animation: loading2 0.6s infinite;
+        }
+
+        .loading div:nth-child(3) {
+            left: 32px;
+            animation: loading2 0.6s infinite;
+        }
+
+        .loading div:nth-child(4) {
+            left: 56px;
+            animation: loading3 0.6s infinite;
+        }
+
+        @keyframes loading1 {
+            0% { transform: scale(0); }
+            100% { transform: scale(1); }
+        }
+
+        @keyframes loading2 {
+            0% { transform: translate(0, 0); }
+            100% { transform: translate(24px, 0); }
+        }
+
+        @keyframes loading3 {
+            0% { transform: scale(1); }
+            100% { transform: scale(0); }
+        }
+
+        /* 添加分析中的视觉反馈样式 */
+        .analyzing-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-weight: 500;
+            border-radius: calc(var(--border-radius) - 4px);
+            z-index: 10;
+        }
+        
+        .analyzing-text {
+            margin-bottom: 12px;
+            font-size: 1.2rem;
+        }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <h1 class="title">Object Detection Demo</h1>
+        <p class="description">
+            Upload an image to detect objects using the DETR model. 
+            The model will identify objects and draw bounding boxes around them.
+        </p>
+        
+        <label class="custom-file-upload">
+            <input id="file-upload" type="file" accept="image/*" />
+            <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            Upload Image
+        </label>
+        
+        <div id="image-container"></div>
+        
+        <div id="status"></div>
+    </main>
+
+    <script type="module">
+        import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers";
+
+        // 禁用本地模型检查
+        env.allowLocalModels = false;
+
+        // DOM 元素引用
+        const fileUpload = document.getElementById("file-upload");
+        const imageContainer = document.getElementById("image-container");
+        const status = document.getElementById("status");
+
+        function showLoading(message) {
+            status.innerHTML = `
+                ${message}
+                <div class="loading">
+                    <div></div>
+                    <div></div>
+                    <div></div>
+                    <div></div>
+                </div>
+            `;
+        }
+
+        // 初始化模型
+        showLoading("Loading model...");
+        const detector = await pipeline("object-detection", "Xenova/detr-resnet-50", {
+            quantized: true,
+            dtype: 'q8'
+        });
+        status.textContent = "Ready";
+
+        // 渲染边界框
+        function renderBox({ box, label }) {
+            const { xmax, xmin, ymax, ymin } = box;
+            const color = "#" + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, 0);
+
+            const boxElement = document.createElement("div");
+            boxElement.className = "bounding-box";
+            Object.assign(boxElement.style, {
+                borderColor: color,
+                left: 100 * xmin + "%",
+                top: 100 * ymin + "%",
+                width: 100 * (xmax - xmin) + "%",
+                height: 100 * (ymax - ymin) + "%",
+            });
+
+            const labelElement = document.createElement("span");
+            labelElement.textContent = label;
+            labelElement.className = "bounding-box-label";
+            labelElement.style.backgroundColor = color;
+
+            boxElement.appendChild(labelElement);
+            imageContainer.appendChild(boxElement);
+        }
+
+        // 检测对象
+        async function detect(img) {
+            // 添加分析中的视觉反馈
+            const overlay = document.createElement("div");
+            overlay.className = "analyzing-overlay";
+            overlay.innerHTML = `
+                <div class="analyzing-text">Analyzing image...</div>
+                <div class="loading">
+                    <div></div>
+                    <div></div>
+                    <div></div>
+                    <div></div>
+                </div>
+            `;
+            imageContainer.appendChild(overlay);
+            
+            try {
+                const output = await detector(img.src, {
+                    threshold: 0.5,
+                    percentage: true,
+                });
+                
+                // 移除分析中的视觉反馈
+                imageContainer.removeChild(overlay);
+                
+                if (output.length === 0) {
+                    status.textContent = "No objects detected in this image.";
+                } else {
+                    status.textContent = `Detected ${output.length} object(s)`;
+                    console.log("output", output);
+                    output.forEach(renderBox);
+                }
+            } catch (error) {
+                console.error("Detection error:", error);
+                status.textContent = "Error during detection: " + error.message;
+                imageContainer.removeChild(overlay);
+            }
+        }
+
+        // 处理文件上传
+        fileUpload.addEventListener("change", function (e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function (e2) {
+                imageContainer.innerHTML = "";
+                const image = document.createElement("img");
+                image.src = e2.target.result;
+                imageContainer.appendChild(image);
+                detect(image);
+            };
+            reader.readAsDataURL(file);
+        });
+    </script>
+
+    <!-- 注册 Service Worker -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./service-worker.js')
+                    .then(registration => {
+                        console.log('Service Worker registered with scope:', registration.scope);
+                    })
+                    .catch(error => {
+                        console.error('Service Worker registration failed:', error);
+                    });
+            });
+        }
+    </script>
+</body>
+</html> 
