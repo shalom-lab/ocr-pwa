@@ -220,6 +220,8 @@
         <p class="description">
             Upload an image to detect objects using the DETR model. 
             The model will identify objects and draw bounding boxes around them.
+            <br>
+            <small style="color: #64748b;">Note: First-time use requires internet connection to download the model (about 50MB).</small>
         </p>
         
         <label class="custom-file-upload">
@@ -242,6 +244,8 @@
 
         // 禁用本地模型检查
         env.allowLocalModels = false;
+        // 设置缓存目录
+        env.cacheDir = './model-cache';
 
         // DOM 元素引用
         const fileUpload = document.getElementById("file-upload");
@@ -261,12 +265,72 @@
         }
 
         // 初始化模型
-        showLoading("Loading model...");
-        const detector = await pipeline("object-detection", "Xenova/detr-resnet-50", {
-            quantized: true,
-            dtype: 'q8'
-        });
-        status.textContent = "Ready";
+        let detector;
+        
+        async function initModel() {
+            try {
+                showLoading("Loading model...");
+                
+                // 尝试使用更小的模型和更多选项来提高加载成功率
+                detector = await pipeline("object-detection", "Xenova/detr-resnet-50", {
+                    quantized: true,
+                    dtype: 'q8',
+                    progress_callback: (progress) => {
+                        if (progress.status === 'progress') {
+                            status.textContent = `Loading model: ${Math.round(progress.progress * 100)}%`;
+                        }
+                    },
+                    config: {
+                        use_simd: false,
+                        use_threads: false,
+                        max_retries: 5,  // 增加重试次数
+                        timeout: 120000  // 增加超时时间到2分钟
+                    }
+                });
+                
+                status.textContent = "Ready";
+                return true;
+            } catch (error) {
+                console.error("Model loading error:", error);
+                
+                // 尝试加载备用模型
+                try {
+                    status.textContent = "Trying alternative model...";
+                    detector = await pipeline("object-detection", "Xenova/yolos-tiny", {
+                        quantized: true,
+                        progress_callback: (progress) => {
+                            if (progress.status === 'progress') {
+                                status.textContent = `Loading alternative model: ${Math.round(progress.progress * 100)}%`;
+                            }
+                        },
+                        config: {
+                            use_simd: false,
+                            use_threads: false
+                        }
+                    });
+                    status.textContent = "Ready (using alternative model)";
+                    return true;
+                } catch (backupError) {
+                    console.error("Backup model loading error:", backupError);
+                    status.innerHTML = `
+                        Error loading models. <br>
+                        <small>This may be due to network issues or browser compatibility.</small>
+                        <button id="retry-button" style="display: block; margin: 10px auto; padding: 8px 16px; background-color: var(--primary-color); color: white; border: none; border-radius: var(--border-radius); cursor: pointer;">
+                            Retry Loading
+                        </button>
+                    `;
+                    
+                    document.getElementById("retry-button").addEventListener("click", () => {
+                        initModel();
+                    });
+                    
+                    return false;
+                }
+            }
+        }
+
+        // 尝试初始化模型
+        await initModel();
 
         // 渲染边界框
         function renderBox({ box, label }) {
@@ -294,6 +358,15 @@
 
         // 检测对象
         async function detect(img) {
+            // 如果模型未加载，尝试重新加载
+            if (!detector) {
+                const success = await initModel();
+                if (!success) {
+                    status.textContent = "Cannot detect objects: Model not loaded";
+                    return;
+                }
+            }
+            
             // 添加分析中的视觉反馈
             const overlay = document.createElement("div");
             overlay.className = "analyzing-overlay";

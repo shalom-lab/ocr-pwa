@@ -1,4 +1,4 @@
-const CACHE_NAME = 'object-detection-cache-v1';
+const CACHE_NAME = 'object-detection-cache-v2';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -41,6 +41,33 @@ self.addEventListener('fetch', event => {
   // 跳过不支持缓存的请求（如 Chrome 扩展请求）
   if (!event.request.url.startsWith('http')) return;
   
+  // 对于模型文件，使用网络优先策略
+  if (event.request.url.includes('cdn-lfs.hf.co') || 
+      event.request.url.includes('huggingface.co') || 
+      event.request.url.includes('.onnx')) {
+    
+    event.respondWith(
+      fetch(event.request.clone())
+        .then(response => {
+          // 缓存有效响应
+          if (response && response.status === 200) {
+            const responseToCache = response.clone();
+            caches.open(CACHE_NAME)
+              .then(cache => {
+                cache.put(event.request, responseToCache);
+              });
+          }
+          return response;
+        })
+        .catch(() => {
+          // 如果网络请求失败，尝试从缓存获取
+          return caches.match(event.request);
+        })
+    );
+    return;
+  }
+  
+  // 对于其他资源，使用缓存优先策略
   event.respondWith(
     caches.match(event.request)
       .then(response => {
