@@ -6,10 +6,7 @@ const ASSETS_TO_CACHE = [
   './icons/icon192.png',
   './icons/icon512.png',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap',
-  'https://cdn.jsdelivr.net/npm/@huggingface/transformers',
-  'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.1/dist/ort-wasm-simd-threaded.jsep.wasm',
-  'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.1/dist/ort-wasm-simd.wasm',
-  'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.1/dist/ort-wasm.wasm'
+  'https://cdn.jsdelivr.net/npm/@huggingface/transformers'
 ];
 
 // 安装 Service Worker 并缓存静态资源

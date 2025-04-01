@@ -220,8 +220,6 @@
         <p class="description">
             Upload an image to detect objects using the DETR model. 
             The model will identify objects and draw bounding boxes around them.
-            <br>
-            <small style="color: #64748b;">Note: First-time use requires internet connection to download the model.</small>
         </p>
         
         <label class="custom-file-upload">
@@ -262,54 +260,13 @@
             `;
         }
 
-        async function initModel() {
-            try {
-                showLoading("Loading model...");
-                const detector = await pipeline("object-detection", "Xenova/detr-resnet-50", {
-                    quantized: true,
-                    dtype: 'q8',
-                    progress_callback: (progress) => {
-                        if (progress.status === 'progress') {
-                            status.textContent = `Loading model: ${Math.round(progress.progress * 100)}%`;
-                        }
-                    },
-                    backend: 'webgl',
-                    config: {
-                        use_simd: false,
-                        use_threads: false
-                    }
-                });
-                status.textContent = "Ready";
-                return detector;
-            } catch (error) {
-                console.error("Model loading error:", error);
-                status.textContent = "Error loading model. Please try a different browser or device.";
-                // 可以在这里添加一个重试按钮
-                const retryButton = document.createElement("button");
-                retryButton.textContent = "Retry Loading Model";
-                retryButton.style.marginTop = "10px";
-                retryButton.style.padding = "8px 16px";
-                retryButton.style.backgroundColor = "var(--primary-color)";
-                retryButton.style.color = "white";
-                retryButton.style.border = "none";
-                retryButton.style.borderRadius = "var(--border-radius)";
-                retryButton.style.cursor = "pointer";
-                retryButton.onclick = async () => {
-                    status.removeChild(retryButton);
-                    return await initModel();
-                };
-                status.appendChild(retryButton);
-                throw error;
-            }
-        }
-
-        // 使用这个函数初始化模型
-        let detector;
-        try {
-            detector = await initModel();
-        } catch (error) {
-            console.error("Failed to initialize model:", error);
-        }
+        // 初始化模型
+        showLoading("Loading model...");
+        const detector = await pipeline("object-detection", "Xenova/detr-resnet-50", {
+            quantized: true,
+            dtype: 'q8'
+        });
+        status.textContent = "Ready";
 
         // 渲染边界框
         function renderBox({ box, label }) {
